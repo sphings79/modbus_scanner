@@ -16,6 +16,7 @@ Schutzmechanismen:
   - Exponentielles Backoff beim Reconnect
   - Periodische Pause alle N Register (--pause-every / --pause-duration)
   - Cooldown nach zu vielen Fehlschlägen (--max-retries / --cooldown)
+    Standard: 3 Versuche, Timeout 5 s
 
 Installation:
     pip install pymodbus
@@ -208,11 +209,11 @@ class ModbusScanner:
                 self._log(LEVEL_DEBUG,
                     f"{C.GREEN}✔  Verbunden mit {self.ip}:{self.port}{C.RESET}")
             else:
-                self._log(LEVEL_DEBUG,
-                    f"{C.RED}✘  Verbindung fehlgeschlagen{C.RESET}")
+                self._log(LEVEL_VERBOSE,
+                    f"{C.RED}✘  Verbindung fehlgeschlagen ({self.ip}:{self.port}){C.RESET}")
             return ok
         except Exception as exc:
-            self._log(LEVEL_DEBUG, f"{C.RED}✘  Verbindungsfehler: {exc}{C.RESET}")
+            self._log(LEVEL_VERBOSE, f"{C.RED}✘  Verbindungsfehler: {exc}{C.RESET}")
             return False
 
     def connect_with_backoff(self, context: str = "") -> bool:
@@ -221,7 +222,7 @@ class ModbusScanner:
         attempts = 0
 
         if context:
-            self._log(LEVEL_DEBUG, f"{C.YELLOW}  ↻  {context}{C.RESET}")
+            self._log(LEVEL_VERBOSE, f"{C.YELLOW}  ↻  {context}{C.RESET}")
 
         while True:
             ok = self.connect(backoff=backoff if attempts > 0 else 0)
@@ -283,9 +284,7 @@ class ModbusScanner:
                      → Erst wenn Heartbeat OK, weiter mit nächstem Register
         """
         if self.heartbeat_reg is None:
-            # Kein Heartbeat – nur reconnecten falls Verbindung weg
-            if not self.client or not self.client.is_socket_open():
-                self.connect_with_backoff(context="Reconnect nach Disconnect …")
+            # Kein Heartbeat – Reconnect überlässt der Scan-Loop dem nächsten Register
             return True
 
         # Fall A: Verbindung noch offen → schneller Heartbeat-Check
@@ -456,10 +455,12 @@ class ModbusScanner:
                     new_skips.add(reg)
                 if disconnected:
                     marker = f"{C.RED}[ABBRUCH – ab nächstem Scan übersprungen]{C.RESET}"
+                    # Disconnect immer anzeigen (auch im Standard-Modus)
+                    print(f"  {reg:>6}  {'✘':>7}  {'✘':>7}  {'✘':>6}  {marker}")
                 else:
                     marker = f"{C.YELLOW}[Fehler]{C.RESET}"
-                self._log(LEVEL_VERBOSE,
-                    f"  {reg:>6}  {'✘':>7}  {'✘':>7}  {'✘':>6}  {marker}")
+                    self._log(LEVEL_VERBOSE,
+                        f"  {reg:>6}  {'✘':>7}  {'✘':>7}  {'✘':>6}  {marker}")
 
             # ── Heartbeat ──
             if not self.heartbeat_or_recover():
@@ -530,8 +531,8 @@ def parse_args():
     p.add_argument("--count",   type=int, required=True, help="Anzahl Register")
     p.add_argument("--delay",   type=float, default=0.3,
                    help="Pause zwischen Registern in Sekunden (default: 0.3)")
-    p.add_argument("--timeout", type=float, default=3.0,
-                   help="TCP-Timeout in Sekunden (default: 3.0)")
+    p.add_argument("--timeout", type=float, default=5.0,
+                   help="TCP-Timeout in Sekunden (default: 5.0)")
     p.add_argument("--repeat",  action="store_true",
                    help="Kontinuierlich wiederholen (Strg+C zum Beenden)")
     p.add_argument("--interval", type=float, default=5.0,
@@ -552,10 +553,10 @@ def parse_args():
                     help="Alle N aktiven Register kurz pausieren (default: 50, 0 = aus)")
     sg.add_argument("--pause-duration", type=float, default=3.0, metavar="SEC",
                     help="Dauer der periodischen Pause in Sekunden (default: 3.0)")
-    sg.add_argument("--max-retries", type=int, default=5, metavar="N",
-                    help="Max. Reconnect-Versuche vor Cooldown (default: 5)")
-    sg.add_argument("--cooldown", type=float, default=30.0, metavar="SEC",
-                    help="Wartezeit nach zu vielen Fehlschlägen (default: 30.0)")
+    sg.add_argument("--max-retries", type=int, default=3, metavar="N",
+                    help="Max. Reconnect-Versuche vor Cooldown (default: 3)")
+    sg.add_argument("--cooldown", type=float, default=10.0, metavar="SEC",
+                    help="Wartezeit nach zu vielen Fehlschlägen (default: 10.0)")
 
     return p.parse_args()
 
@@ -580,7 +581,7 @@ def main():
     print(f"  Modbus TCP Scanner")
     print(f"  Ziel       : {args.ip}:{args.port}  Unit {args.unit}")
     print(f"  Bereich    : Register {args.start} … {args.start + args.count - 1} ({args.count} Stk.)")
-    print(f"  Delay      : {args.delay}s  Timeout: {args.timeout}s")
+    print(f"  Delay      : {args.delay}s  Timeout: {args.timeout}s  Retries: {args.max_retries}")
     print(f"  Heartbeat  : {hb_label}")
     if args.pause_every:
         print(f"  Pause      : alle {args.pause_every} Reg. → {args.pause_duration}s")
