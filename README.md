@@ -8,6 +8,7 @@
 ![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey)
 ![Protocol](https://img.shields.io/badge/Modbus-TCP-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+![Version](https://img.shields.io/badge/Version-3.0.0-brightgreen)
 
 ---
 
@@ -23,6 +24,7 @@
 - [Beispiele](#-beispiele)
 - [Ausgabe verstehen](#-ausgabe-verstehen)
 - [Häufige Probleme](#-häufige-probleme)
+- [Changelog](#-changelog)
 
 ---
 
@@ -30,7 +32,7 @@
 
 Viele Wechselrichter, Batteriespeicher und Energiemanager (z. B. Marstek, Huawei, SMA)
 können über das **Modbus-Protokoll** ausgelesen werden. Modbus überträgt Messwerte und
-Zustände als nummerierte *Register* — zum Beispiel: Register 34002 = Ladezustand in Prozent.
+Zustände als nummerierte *Register* — zum Beispiel: Register 30000 = aktuelle Leistung.
 
 Das Problem: Ohne offizielle Dokumentation weiß man oft nicht, welche Register existieren
 und was sie bedeuten. Dieses Script scannt einen definierten Bereich Register für Register
@@ -56,6 +58,40 @@ und zeigt dir, welche Werte zurückgeliefert werden.
 
 ---
 
+## ✅ Marstek Venus D — getestet & optimiert
+
+Dieser Scanner wurde ausgiebig mit dem **Marstek Venus D** getestet. Das Gerät trennt die
+TCP-Verbindung bei jedem nicht vorhandenem Register — genau dafür ist der Scanner ausgelegt.
+
+**Empfohlener Befehl für den Marstek Venus D:**
+
+```bash
+python ~/modbus_scanner.py \
+    --ip 192.168.1.123 \
+    --port 502 \
+    --start 34000 \
+    --count 6000 \
+    --timeout 1 \
+    --delay 0.1 \
+    --pause-every 0 \
+    -v
+```
+
+> `--timeout 1` und `--pause-every 0` beschleunigen den Scan erheblich.
+> Der Scanner reconnectet nach jedem Verbindungsabbruch automatisch.
+
+Bekannte Register-Bereiche mit Daten (Marstek Venus D):
+
+| Bereich | Inhalt |
+|---------|--------|
+| 30000–30007 | Systemstatus, Spannung, Frequenz |
+| 30020–30040 | Ladezustand, Leistung |
+| 30100–30110 | Energiezähler |
+| 30200–30214 | Temperaturen, weitere Zähler |
+| 41000 | Heartbeat / Lebendprüfung (immer 0) |
+
+---
+
 ## ⚙️ Wie funktioniert es?
 
 Das Script arbeitet Register für Register und geht dabei so vor:
@@ -65,18 +101,19 @@ Das Script arbeitet Register für Register und geht dabei so vor:
 2. Einzelnes Register per Modbus FC03 abfragen
 3. Antwort prüfen:
    ├─ Wert erhalten  →  in CSV schreiben, anzeigen
-   └─ Verbindung getrennt  →  Register in Sperrliste
-4. Heartbeat-Register abfragen (nach dem Reconnect):
+   └─ Verbindung getrennt  →  Register in Sperrliste, weiter
+4. (Optional) Heartbeat-Register abfragen:
    ├─ Gerät antwortet  →  weiter mit nächstem Register
    └─ Keine Antwort    →  Cooldown verlängern, erneut versuchen
-5. Alle N Register: kurze Pause (Gerät schonen)
+5. Alle N Register: kurze Pause (Gerät schonen, 0 = deaktiviert)
 6. Nächstes Register — gesperrte Register werden übersprungen
+7. Nach dem Scan: uint32/int32/uint64/ASCII berechnen, CSV aktualisieren
 ```
 
 > **Warum Register einzeln?**
 > Geräte wie der Marstek Venus D trennen die Verbindung sofort, wenn ein nicht vorhandenes
-> Register angefragt wird. Durch Einzelabfragen mit Reconnect-Logik und Heartbeat-Prüfung
-> schlägt sich das Script trotzdem durch den gesamten Bereich.
+> Register angefragt wird. Durch Einzelabfragen mit Reconnect-Logik schlägt sich das Script
+> trotzdem durch den gesamten Bereich.
 
 ---
 
@@ -88,7 +125,7 @@ Das Script arbeitet Register für Register und geht dabei so vor:
 | **Python** | 3.9 oder neuer (wird über Homebrew installiert) |
 | **Netzwerk** | Mac und Gerät im gleichen Netzwerk, IP-Adresse und Port bekannt |
 
-> ⚠️ **Marstek Venus D:** Verwendet Port `502`. Prüfe die Dokumentation deines Geräts für den korrekten Port.
+> ⚠️ **Marstek Venus D:** Verwendet Port `502`.
 
 ---
 
@@ -98,89 +135,54 @@ Die Installation ist **einmalig**. Danach kannst du das Script jederzeit starten
 
 ### Schritt 1 — Homebrew installieren
 
-Homebrew ist ein Paketmanager für macOS. Öffne die **Terminal**-App
-(Programme → Dienstprogramme → Terminal) und füge ein:
-
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
-
-Du wirst nach deinem macOS-Passwort gefragt. Falls Homebrew bereits installiert ist,
-erhältst du eine entsprechende Meldung — das ist in Ordnung.
 
 ### Schritt 2 — Python installieren
 
 ```bash
 brew install python
-
-# Prüfen ob Python korrekt installiert ist:
 python3 --version
-# Python 3.14.0  (Versionsnummer kann abweichen)
+# Python 3.14.0
 ```
 
 ### Schritt 3 — Virtual Environment anlegen
 
-macOS erlaubt keine systemweite Installation von Python-Paketen. Wir legen daher eine
-isolierte Umgebung an (ein „venv") — das ist der empfohlene Weg:
-
 ```bash
-# Umgebung einmalig anlegen:
 python3 -m venv ~/modbus-env
-
-# Umgebung aktivieren (bei jedem neuen Terminal-Fenster wiederholen):
 source ~/modbus-env/bin/activate
-
-# Wenn aktiv, siehst du "(modbus-env)" am Anfang der Zeile:
 # (modbus-env) %
 ```
 
 ### Schritt 4 — pymodbus installieren
 
 ```bash
-# (venv muss aktiv sein!)
 pip install pymodbus
-
-# Erfolgreich wenn:
 # Successfully installed pymodbus-3.13.0
 ```
 
-> ✅ Die Installation ist abgeschlossen. Sie muss **nie wiederholt** werden —
-> nur bei jedem neuen Terminal-Fenster das venv aktivieren:
-> ```bash
-> source ~/modbus-env/bin/activate
-> ```
+> ✅ Bei jedem neuen Terminal-Fenster: `source ~/modbus-env/bin/activate`
 
 ---
 
 ## 📄 Script speichern
 
-Lade `modbus_scanner.py` aus dem [GitHub Repository](https://github.com/sphings79/modbus_scanner)
-herunter und kopiere es in dein Home-Verzeichnis:
+Lade `modbus_scanner.py` aus dem [GitHub Repository](https://github.com/sphings79/modbus_scanner) herunter:
 
 ```bash
 cp ~/Downloads/modbus_scanner.py ~/modbus_scanner.py
-
-# Prüfen ob die Datei vorhanden ist:
-ls ~/modbus_scanner.py
-# /Users/deinname/modbus_scanner.py  ✓
+ls ~/modbus_scanner.py  # ✓
 ```
 
 ---
 
 ## ▶️ Erster Start
 
-Bei jedem Start: zuerst das venv aktivieren, dann das Script aufrufen.
-
 ```bash
-# 1. venv aktivieren:
 source ~/modbus-env/bin/activate
-
-# 2. Script starten:
-(modbus-env) % python ~/modbus_scanner.py --ip 192.168.1.123 --port 502 --start 30000 --count 500
+python ~/modbus_scanner.py --ip 192.168.1.123 --port 502 --start 30000 --count 500
 ```
-
-> ⚠️ Ersetze `192.168.1.123` durch die tatsächliche IP-Adresse deines Geräts.
-> Diese findest du im Router (Fritzbox, UniFi etc.) oder im Gerätedisplay.
 
 ---
 
@@ -192,11 +194,11 @@ source ~/modbus-env/bin/activate
 |-----------|:-------:|:--------:|--------------|
 | `--ip` | ✅ | — | IP-Adresse des Modbus-Geräts |
 | `--port` | — | `502` | TCP-Port des Geräts |
-| `--unit` | — | `1` | Modbus Unit-ID (Slave-Adresse). Bei den meisten Geräten `1`. |
-| `--start` | ✅ | — | Erstes Register (0-basiert), z. B. `30000` |
-| `--count` | ✅ | — | Anzahl der Register, die gescannt werden sollen |
+| `--unit` | — | `1` | Modbus Unit-ID |
+| `--start` | ✅ | — | Erstes Register (0-basiert) |
+| `--count` | ✅ | — | Anzahl der Register |
 | `--delay` | — | `0.3` | Pause zwischen Registern in Sekunden |
-| `--timeout` | — | `3.0` | TCP-Timeout in Sekunden |
+| `--timeout` | — | `5.0` | TCP-Timeout in Sekunden |
 | `--repeat` | — | aus | Kontinuierlich wiederholen bis `Strg+C` |
 | `--interval` | — | `5.0` | Pause zwischen Wiederholungen (nur mit `--repeat`) |
 
@@ -204,33 +206,36 @@ source ~/modbus-env/bin/activate
 
 | Parameter | Standard | Beschreibung |
 |-----------|:--------:|--------------|
-| `--verbose` / `-v` | aus | Fehler, Skips und Heartbeat-Bestätigung anzeigen |
-| `--debug` | aus | Reconnects, Connect-Meldungen und pymodbus-Logs anzeigen (inkl. `-v`) |
-| `--csv DATEI` | — | Treffer live als CSV speichern — wird bei Strg+C nicht unterbrochen |
+| `--verbose` / `-v` | aus | Fehler, Skips, Heartbeat-Bestätigung + erweiterte Interpretations-Tabelle |
+| `--debug` | aus | Reconnects, Connect-Meldungen und pymodbus-Logs (inkl. `-v`) |
+| `--csv DATEI` | — | Treffer live als CSV speichern |
 
 ### Schutz vor Gerät-Überlastung
 
 | Parameter | Standard | Beschreibung |
 |-----------|:--------:|--------------|
 | `--heartbeat-reg REG` | — | Register das nach jedem Poll als Lebendprüfung abgefragt wird |
-| `--pause-every N` | `50` | Alle N aktiven Register kurz pausieren (`0` = deaktiviert) |
+| `--pause-every N` | `50` | Alle N aktiven Register pausieren (`0` = deaktiviert) |
 | `--pause-duration SEC` | `3.0` | Dauer der periodischen Pause in Sekunden |
-| `--max-retries N` | `5` | Maximale Reconnect-Versuche vor Cooldown |
-| `--cooldown SEC` | `30.0` | Wartezeit nach zu vielen Fehlschlägen. Verdoppelt sich bei weiteren Fehlern. |
+| `--max-retries N` | `3` | Maximale Reconnect-Versuche vor Cooldown |
+| `--cooldown SEC` | `10.0` | Wartezeit nach zu vielen Fehlschlägen |
 
 ---
 
 ## 💡 Beispiele
 
-### Marstek Venus D — typischer Scan
+### Marstek Venus D — optimierter Schnellscan (empfohlen)
 
 ```bash
 python ~/modbus_scanner.py \
     --ip 192.168.1.123 \
     --port 502 \
-    --start 30000 \
-    --count 500 \
-    --heartbeat-reg 30100
+    --start 34000 \
+    --count 6000 \
+    --timeout 1 \
+    --delay 0.1 \
+    --pause-every 0 \
+    -v
 ```
 
 ### Mit CSV-Export und Heartbeat
@@ -241,14 +246,14 @@ python ~/modbus_scanner.py \
     --port 502 \
     --start 30000 \
     --count 5000 \
-    --heartbeat-reg 30100 \
+    --heartbeat-reg 41000 \
     --delay 0.5 \
     --pause-every 30 \
     --pause-duration 5 \
     --csv ~/marstek_scan.csv
 ```
 
-### Großen Bereich schonend scannen
+### Großen Bereich scannen
 
 ```bash
 python ~/modbus_scanner.py \
@@ -256,10 +261,9 @@ python ~/modbus_scanner.py \
     --port 502 \
     --start 0 \
     --count 10000 \
-    --delay 0.5 \
-    --pause-every 30 \
-    --pause-duration 5 \
-    --heartbeat-reg 30100 \
+    --timeout 1 \
+    --delay 0.1 \
+    --pause-every 0 \
     --csv ~/scan_komplett.csv
 ```
 
@@ -272,23 +276,7 @@ python ~/modbus_scanner.py \
     --start 30000 \
     --count 500 \
     --repeat \
-    --interval 10     # alle 10 Sekunden wiederholen
-
-# Beenden mit Strg+C
-```
-
-### Erweiterte Ausgabe für Reverse Engineering
-
-```bash
-python ~/modbus_scanner.py \
-    --ip 192.168.1.123 \
-    --port 502 \
-    --start 30000 \
-    --count 500 \
-    -v \
-    --csv ~/scan_extended.csv
-# -v zeigt nach dem Scan die erweiterte Interpretations-Tabelle
-# CSV enthält: binary, ascii, uint32, int32, uint64
+    --interval 10
 ```
 
 ### Verbindungsprobleme debuggen
@@ -300,32 +288,21 @@ python ~/modbus_scanner.py \
     --start 30000 \
     --count 100 \
     --debug
-# zeigt alle Reconnects, Connect-Meldungen und pymodbus-Logs
 ```
 
 ---
 
 ## 📊 Ausgabe verstehen
 
-### Terminal-Ausgabe
-
 ```
-════════════════════════════════════════════════════════════════
-  Modbus TCP Scanner
-  Ziel       : 192.168.1.123:502  Unit 1
-  Bereich    : Register 30000 … 30499 (500 Stk.)
-  Heartbeat  : Reg 30100
-  Pause      : alle 50 Reg. → 3.0s
-  Ausgabe    : verbose
-════════════════════════════════════════════════════════════════
-
      Reg   uint16    int16     hex  Status
   ──────────────────────────────────────────────────────
-   30100     2300     2300   0x08fc  OK
-   30101      120      120   0x0078  OK
-   30200      115      115   0x0073  OK
+   30000      511      511  0x01ff  OK
+   30001    65525      -11  0xfff5  OK
+   30008        ✘        ✘       ✘  [ABBRUCH – ab nächstem Scan übersprungen]
+   30020       99       99  0x0063  OK
   ──────────────────────────────────────────────────────
-  ✔ OK: 3   ✘ Fehler: 12   ⏭ Übersprungen: 0
+  ✔ OK: 3   ✘ Fehler: 1   ⏭ Übersprungen: 0
 ```
 
 ### Erweiterte Interpretations-Tabelle (mit `-v`)
@@ -334,29 +311,28 @@ python ~/modbus_scanner.py \
   Erweiterte Interpretationen:
   Reg     bin                ascii    uint32        int32         uint64
   ──────────────────────────────────────────────────────────────────────
-  33000  0000000000000000      ··           0             0             0
-  33001  0000001000100011      ·#       8739          8739
-  33002  0000000000001000      ··      524296        524296
+  30000  0000000111111111      ··       33488895       33488895             0
+  30001  1111111111110101      ··
 ```
 
 ### Bedeutung der Spalten
 
 | Spalte | Bedeutung |
 |--------|-----------|
-| `uint16` | Vorzeichenloser 16-Bit-Wert (0–65535). Gut für Prozente, Spannung, Frequenz. |
+| `uint16` | Vorzeichenloser 16-Bit-Wert (0–65535). Prozente, Spannung, Frequenz. |
 | `int16` | Vorzeichenbehafteter 16-Bit-Wert (−32768–32767). Leistung, Strom — negativ = Einspeisung. |
-| `hex` | Rohwert hexadezimal. Hilfreich beim Abgleich mit Dokumentation. |
-| `binary` | 16-Bit Binärdarstellung. Hilft bei Bitmask-Registern einzelne Flags zu erkennen. |
-| `ascii` | Die zwei Bytes als druckbare ASCII-Zeichen. Deutet auf `char`-Register hin (z. B. Gerätename). |
+| `hex` | Rohwert hexadezimal. |
+| `binary` | 16-Bit Binärdarstellung. Hilft bei Bitmask-Registern. |
+| `ascii` | Die zwei Bytes als druckbare ASCII-Zeichen. Deutet auf Zeichenketten-Register hin. |
 | `uint32` | Dieses + nächstes Register als vorzeichenloser 32-Bit-Wert. Typisch für Energiezähler. |
 | `int32` | Dieses + nächstes Register als vorzeichenbehafteter 32-Bit-Wert. |
-| `uint64` | Vier aufeinanderfolgende Register kombiniert. Typisch für Alarm-/Fault-Status. |
+| `uint64` | Vier Register kombiniert. Typisch für Alarm-/Fault-Status. |
 
 > 💡 **Skalierung beachten:** Viele Geräte senden z. B. Spannung × 10 — der Wert `2300`
-> bedeutet dann 230,0 V. Die Skalierung steht in der Gerätedokumentation.
+> bedeutet dann 230,0 V.
 
 > 💡 **Ausgabe-Ebenen:**
-> - **Standard** — nur Treffer + Heartbeat-Fehler + Cooldown-Meldungen
+> - **Standard** — nur Treffer + Disconnect-Meldungen + Cooldown
 > - **`-v`** — zusätzlich Fehler, Skips, Heartbeat-OK, erweiterte Interpretations-Tabelle
 > - **`--debug`** — alles inkl. Reconnects, Connect-Status, pymodbus-Logs
 
@@ -364,14 +340,9 @@ python ~/modbus_scanner.py \
 
 ```csv
 register,uint16,int16,hex,binary,ascii,uint32,int32,uint64
-30100,2300,2300,0x08fc,0000100011111100,·8,150994944,150994944,
-30101,120,120,0x0078,0000000001111000,·x,,, 
-33000,0,0,0x0000,0000000000000000,··,8739,8739,
-33001,8739,8739,0x2223,0010001000100011,·#,,,
+30000,511,511,0x01ff,0000000111111111,··,33488895,33488895,
+30020,99,99,0x0063,0000000001100011,·c,,,
 ```
-
-> 💡 Die CSV wird **live nach jedem Treffer** geschrieben. Ein Abbruch mit `Strg+C`
-> hinterlässt eine vollständige Datei mit allen bis dahin gescannten Registern.
 
 ---
 
@@ -379,45 +350,62 @@ register,uint16,int16,hex,binary,ascii,uint32,int32,uint64
 
 ### Verbindung schlägt fehl
 
-**Falscher Port:** Prüfe in der Gerätedokumentation welcher Port verwendet wird.
+**Falscher Port:** Standard ist `502`. Im Router oder Gerätedisplay nachschauen.
 
-**Falsche IP:** Mac und Gerät müssen im selben Netzwerk sein. IP im Router nachschauen
-(Fritzbox → Heimnetz → Netzwerk, oder UniFi → Clients).
-
-**Firewall:** Manche Geräte erlauben nur Verbindungen aus bestimmten IP-Bereichen.
+**Falsche IP:** Mac und Gerät müssen im selben Netzwerk sein.
 
 ### Gerät hört nach einer Weile auf zu antworten
 
 Das Gerät ist vermutlich überlastet. Empfohlene Einstellungen:
 
 ```bash
---delay 0.5 --pause-every 30 --pause-duration 5 --heartbeat-reg <bekanntes Register>
+--delay 0.5 --pause-every 30 --pause-duration 5 --heartbeat-reg 41000
 ```
 
-Der Heartbeat erkennt den Zustand automatisch und wartet mit exponentiell wachsendem
-Cooldown bis das Gerät wieder antwortet.
+### Nur Fehler, keine Werte
+
+Der gewählte Register-Bereich enthält keine Daten. Probiere andere Startregister oder
+starte mit `-v` um zu sehen was passiert.
 
 ### „command not found: python"
 
-Immer `python3` verwenden oder zuerst das venv aktivieren:
-
-```bash
-source ~/modbus-env/bin/activate
-# danach reicht: python
-```
+Zuerst das venv aktivieren: `source ~/modbus-env/bin/activate`
 
 ### Script nach Neustart nicht mehr gefunden
 
-Checkliste für jeden neuen Terminal-Start:
-
 ```bash
-# 1. venv aktivieren:
 source ~/modbus-env/bin/activate
-
-# 2. Prüfen ob pymodbus verfügbar ist:
 python -c "import pymodbus; print('OK')"
-# OK  ✓ Alles bereit
 ```
+
+---
+
+## 📋 Changelog
+
+### v3.0.0 — 2025-05-08
+
+**Neue Features:**
+- Erweiterte Register-Interpretation: `uint32`, `int32`, `uint64`, ASCII werden nach dem Scan
+  automatisch berechnet und in die CSV geschrieben (bisher nur uint16/int16/hex)
+- `-v` zeigt nach dem Scan eine vollständige Interpretations-Tabelle aller Treffer
+
+**Verbesserte Standardwerte (Marstek Venus D optimiert):**
+- `--timeout`: 3.0 s → **5.0 s**
+- `--max-retries`: 5 → **3**
+- `--cooldown`: 30.0 s → **10.0 s**
+
+**Bugfixes:**
+- Doppelter Reconnect nach Verbindungsabbruch eliminiert → deutlich schnellerer Scan
+  (betrifft Scans ohne `--heartbeat-reg`)
+- Disconnect-Events werden jetzt im Standard-Modus angezeigt (vorher nur mit `-v`)
+- Verbindungsfehler in `connect()` werden jetzt mit `-v` angezeigt (vorher nur `--debug`)
+- Reconnect-Kontext in `connect_with_backoff` jetzt mit `-v` sichtbar
+
+### v2.0.0
+
+- Erweiterte CSV-Ausgabe mit binary, ascii, uint32, int32, uint64
+- Heartbeat-Mechanismus mit exponentiellem Cooldown
+- Drei Ausgabe-Ebenen (Standard / -v / --debug)
 
 ---
 
